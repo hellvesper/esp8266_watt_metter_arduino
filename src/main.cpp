@@ -9,9 +9,16 @@
 #include "ADS1115.h"
 
 #define HOUR_MILLIS 3.6e6
-#define MEASURE_INTERVAL 500 //millis
-#define PRINT_INTERVAL 1000 //millis
+#define MEASURE_INTERVAL 500 	// millis
+#define PRINT_INTERVAL 1000 	// millis
 #define SHUNT_RESISTOR_mOhm 500 // resistor value in milliohms
+/*
+ * Vsource x R2 / (R1 + R2) = Vout
+ * Vsource = Vo x (R1 + R2) / R2
+ * (10k + 6.8k) / 6.8k = 2.47 - ratio
+ * Vsource = Vo x 2.47
+ */
+#define VOLTAGE_DIVIDER_RATIO 2.47
 
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS); 
 
@@ -46,6 +53,8 @@ void loop() {
 	{
 		measure_init = millis();		
 		//*** Amp ***
+		sensorOneCounts = 0;
+		sensorTwoCounts = 0;
 		
 		sensorOneCounts=adc0.getConversionP0N1();  // counts up to 16-bits
 		ampsConsumedADC += sensorOneCounts;
@@ -55,19 +64,16 @@ void loop() {
 		// Manually set the MUX  // could have used the getConversionP* above
 		adc0.setMultiplexer(ADS1115_MUX_P2_N3); 
 		sensorTwoCounts=adc0.getConversion();  // ADC raw
-		// wattsConsumedADC += sensorTwoCounts;
-		sourceVoltage = sensorTwoCounts * adc0.getMvPerCount() / 1000 * 2; // Volts, 2 - is resistor devider ratio
+		sourceVoltage = sensorTwoCounts * adc0.getMvPerCount() / 1000 * VOLTAGE_DIVIDER_RATIO; // Volts
 		wattsConsumed+= sourceVoltage * loadCurrent;
 	}
-	
 
 	if (millis() - print_init > PRINT_INTERVAL)
 	{
 		print_init = millis();
 		// Get the number of counts of the accumulator
-		Serial.print("ADC1=");
-		
-		Serial.print(sensorOneCounts);
+		// Serial.print("ADC1=");
+		// Serial.print(sensorOneCounts);
 
 		// To turn the counts into a voltage, we can use
 		Serial.print(" mVoltage=");
@@ -77,8 +83,8 @@ void loop() {
 		Serial.print(loadCurrent,4);
 		Serial.print("A");
 
-		Serial.print("	ADC2=");
-		Serial.print(sensorTwoCounts);  
+		// Serial.print("	ADC2=");
+		// Serial.print(sensorTwoCounts);  
 
 		Serial.print(" Voltage=");
 		Serial.print(sourceVoltage,4);
@@ -86,7 +92,7 @@ void loop() {
 		loadPower = sourceVoltage * loadCurrent;
 		
 		watts = wattsConsumed / (HOUR_MILLIS / MEASURE_INTERVAL);
-		ampsConsumed += ampsConsumedADC * adc0.getMvPerCount() / 500 / (HOUR_MILLIS / MEASURE_INTERVAL);
+		ampsConsumed = ampsConsumedADC * adc0.getMvPerCount() / 500 / (HOUR_MILLIS / MEASURE_INTERVAL);
 		Serial.print("	Power="); Serial.print(loadPower,4); Serial.print("W");
 		Serial.print(" Total_Amps="); Serial.print(ampsConsumed,6); Serial.print("A•h");
 		Serial.print(" Total_Watts="); Serial.print(watts,6); Serial.print("W•h");
@@ -95,7 +101,6 @@ void loop() {
 		// delay(MEASURE_INTERVAL); // sleep all time left till next measure
 		// int wait = MEASURE_INTERVAL - (millis() - measure_init);
     	// delay(MEASURE_INTERVAL - (millis() - measure_init)); // sleep all time left till next measure
-
 	}
 	
 }
