@@ -32,6 +32,9 @@ THE SOFTWARE.
 #include <Arduino.h>
 #include "ADS1115.h"
 
+#define HOUR_MILLIS 3.6e6
+#define MEASURE_INTERVAL 500 //millis
+
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS); 
 
 void setup() {                
@@ -52,40 +55,49 @@ void setup() {
 }
 
 void loop() {
-
+	static float wattsConsumed = 0;
+	static float ampsConsumed = 0;
+	static uint64_t ampsConsumedADC, wattsConsumedADC = 0;
     // Sensor is on P0/N1 (pins 4/5)
-    Serial.println("Sensor 1 ************************");
     // Set the gain (PGA) +/- 2.048v
     adc0.setGain(ADS1115_PGA_2P048);
 
     // Get the number of counts of the accumulator
-    Serial.print("Counts for sensor 1 is:");
+    Serial.print("ADC1 = ");
     
     // The below method sets the mux and gets a reading.
-    int sensorOneCounts=adc0.getConversionP0N1();  // counts up to 16-bits  
-    Serial.println(sensorOneCounts);
+    int sensorOneCounts=adc0.getConversionP0N1();  // counts up to 16-bits
+	ampsConsumedADC += sensorOneCounts;
+    Serial.print(sensorOneCounts);
 
     // To turn the counts into a voltage, we can use
-    Serial.print("Voltage for sensor 1 is:");
-    Serial.println(sensorOneCounts*adc0.getMvPerCount());
-    
-    Serial.println();
-     
-     
-    // 2nd sensor is on P2/N3 (pins 6/7)
-    Serial.println("Sensor 2 ************************");
-    // Set the gain (PGA) +/- 2.048v
-    // adc0.setGain(ADS1115_PGA_2P048);
+    Serial.print(" | Voltage = ");
+    Serial.print(sensorOneCounts*adc0.getMvPerCount(), 4);
+    Serial.print("mV");
+	Serial.print(" | Amp = ");
+	float loadCurrent = sensorOneCounts * adc0.getMvPerCount() / 500; // 500mOhms is shunt resistor value
+	Serial.print(loadCurrent,4);
+	Serial.print("A");
 
     // Manually set the MUX  // could have used the getConversionP* above
     adc0.setMultiplexer(ADS1115_MUX_P2_N3); 
-    Serial.print("Counts for sensor 2 is:");
-    Serial.println(adc0.getConversion());  
+	int sensorTwoCounts=adc0.getConversion();  // ADC raw
+	wattsConsumedADC += sensorTwoCounts;
+    Serial.print(" || ADC2 = ");
+    Serial.print(sensorTwoCounts);  
 
-    Serial.print("Voltage sensor 2 is:");
-    Serial.println(adc0.getMilliVolts());  // Convenience method to calculate voltage
-
-    Serial.println();
+    Serial.print(" | Voltage = ");
+	float sourceVoltage = sensorTwoCounts * adc0.getMvPerCount() / 1000 * 2; // 2 - is resistor devider ratio
+    Serial.print(sourceVoltage,4);
     
-    delay(500);
+	float loadPower = sourceVoltage * loadCurrent;
+	
+	// wattsConsumed += loadPower;
+	// ampsConsumed += loadCurrent;
+	Serial.print(" || Power = "); Serial.print(loadPower,4); Serial.print("W•h");
+	Serial.print(" | Total Amps = "); Serial.print(ampsConsumed,4); Serial.print("A•h");
+	Serial.print(" | Total Watts = "); Serial.print(wattsConsumed,4); Serial.print("W");
+	Serial.println();
+    
+    delay(MEASURE_INTERVAL);
 }
