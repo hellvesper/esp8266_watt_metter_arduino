@@ -6,7 +6,11 @@
  */
 
 #include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <Ticker.h>
+#include <AsyncMqttClient.h>
 #include "ADS1115.h"
+
 
 #define HOUR_MILLIS 3.6e6
 #define MEASURE_INTERVAL 500 	// millis
@@ -21,6 +25,55 @@
 #define VOLTAGE_DIVIDER_RATIO 2.47
 
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS); 
+
+#define WIFI_SSID "MySSID"
+#define WIFI_PASSWORD "mypassword"
+
+#define MQTT_HOST IPAddress(127,0,0,1)
+#define MQTT_PORT 1883
+
+AsyncMqttClient mqttClient;
+Ticker mqttReconnectTimer;
+
+WiFiEventHandler wifiConnectHandler;
+WiFiEventHandler wifiDisconnectHandler;
+Ticker wifiReconnectTimer;
+
+void connectToWifi() {
+  Serial.println("Connecting to Wi-Fi...");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+void connectToMqtt() {
+  Serial.println("Connecting to MQTT...");
+  mqttClient.connect();
+}
+
+void onWifiConnect(const WiFiEventStationModeGotIP& event) {
+  Serial.println("Connected to Wi-Fi.");
+  connectToMqtt();
+}
+
+void onWifiDisconnect(const WiFiEventStationModeDisconnected& event) {
+  Serial.println("Disconnected from Wi-Fi.");
+  mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+  wifiReconnectTimer.once(2, connectToWifi);
+}
+
+void onMqttConnect(bool sessionPresent) {
+  Serial.println("Connected to MQTT.");
+  Serial.print("Session present: ");
+  Serial.println(sessionPresent);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+  Serial.println("Disconnected from MQTT.");
+
+  if (WiFi.isConnected()) {
+    mqttReconnectTimer.once(2, connectToMqtt);
+  }
+}
+
 
 void setup() {                
     Wire.begin();  // join I2C bus
@@ -38,6 +91,15 @@ void setup() {
     // We're going to do continuous sampling
     adc0.setMode(ADS1115_MODE_CONTINUOUS);
 	adc0.setGain(ADS1115_PGA_2P048);
+
+	wifiConnectHandler = WiFi.onStationModeGotIP(onWifiConnect);
+	wifiDisconnectHandler = WiFi.onStationModeDisconnected(onWifiDisconnect);
+
+	mqttClient.onConnect(onMqttConnect);
+	mqttClient.onDisconnect(onMqttDisconnect);
+	mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+
+	connectToWifi();
 }
 
 void loop() {
@@ -101,6 +163,18 @@ void loop() {
 		// delay(MEASURE_INTERVAL); // sleep all time left till next measure
 		// int wait = MEASURE_INTERVAL - (millis() - measure_init);
     	// delay(MEASURE_INTERVAL - (millis() - measure_init)); // sleep all time left till next measure
+		
+		char buff[10]; // 9 digits + \0
+		dtostrf(sourceVoltage, 0, 4, buff);
+		mqttClient.publish("battester/voltage", 0, false, buff);
+		dtostrf(loadCurrent, 0, 4, buff);
+		mqttClient.publish("battester/current", 0, false, buff);
+		dtostrf(loadPower, 0, 4, buff);
+		mqttClient.publish("battester/power", 0, false, buff);
+		dtostrf(ampsConsumed, 0, 6, buff);
+		mqttClient.publish("battester/amps", 0, false, buff);
+		dtostrf(watts, 0, 6, buff);
+		mqttClient.publish("battester/watts", 0, false, buff);
 	}
 	
 }
