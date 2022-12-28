@@ -11,6 +11,7 @@
 #include <AsyncMqttClient.h>
 #include "ADS1115.h"
 
+#define DEBUG true
 
 #define HOUR_MILLIS 3.6e6
 #define MEASURE_INTERVAL 500 	// millis
@@ -40,49 +41,65 @@ WiFiEventHandler wifiDisconnectHandler;
 Ticker wifiReconnectTimer;
 
 void connectToWifi() {
-  Serial.println("Connecting to Wi-Fi...");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+	#ifdef DEBUG
+  	Serial.println("Connecting to Wi-Fi...");
+	#endif
+	WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
 void connectToMqtt() {
-  Serial.println("Connecting to MQTT...");
-  mqttClient.connect();
+	#ifdef DEBUG
+  	Serial.println("Connecting to MQTT...");
+	#endif
+  	mqttClient.connect();
 }
 
 void onWifiConnect(const WiFiEventStationModeGotIP& event) {
-  Serial.println("Connected to Wi-Fi.");
-  connectToMqtt();
+	#ifdef DEBUG
+  	Serial.println("Connected to Wi-Fi.");
+	#endif
+  	connectToMqtt();
 }
 
 void onWifiDisconnect(const WiFiEventStationModeDisconnected& event) {
-  Serial.println("Disconnected from Wi-Fi.");
-  mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
-  wifiReconnectTimer.once(2, connectToWifi);
+	#ifdef DEBUG
+  	Serial.println("Disconnected from Wi-Fi.");
+	#endif
+  	mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+  	wifiReconnectTimer.once(2, connectToWifi);
 }
 
 void onMqttConnect(bool sessionPresent) {
-  Serial.println("Connected to MQTT.");
-  Serial.print("Session present: ");
-  Serial.println(sessionPresent);
+	#ifdef DEBUG
+	Serial.println("Connected to MQTT.");
+	Serial.print("Session present: ");
+	Serial.println(sessionPresent);
+	#endif
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-  Serial.println("Disconnected from MQTT.");
+	#ifdef DEBUG
+  	Serial.println("Disconnected from MQTT.");
+	#endif
 
   if (WiFi.isConnected()) {
-    mqttReconnectTimer.once(2, connectToMqtt);
+	mqttReconnectTimer.once(2, connectToMqtt);
   }
 }
 
 
 void setup() {                
     Wire.begin();  // join I2C bus
+	#ifdef DEBUG
     Serial.begin(19200); // initialize serial communication 
     Serial.println("Initializing I2C devices..."); 
+	#endif
     adc0.initialize(); // initialize ADS1115 16 bit A/D chip
     
+	#ifdef DEBUG
     Serial.println("Testing device connections...");
     Serial.println(adc0.testConnection() ? "ADS1115 connection successful" : "ADS1115 connection failed");
+	#endif
       
     // To get output from this method, you'll need to turn on the 
     //#define ADS1115_SERIAL_DEBUG // in the ADS1115.h file
@@ -138,6 +155,7 @@ void loop() {
 		// Serial.print(sensorOneCounts);
 
 		// To turn the counts into a voltage, we can use
+		#ifdef DEBUG
 		Serial.print(" mVoltage=");
 		Serial.print(sensorOneCounts*adc0.getMvPerCount(), 4);
 		Serial.print("mV");
@@ -150,15 +168,18 @@ void loop() {
 
 		Serial.print(" Voltage=");
 		Serial.print(sourceVoltage,4);
+		#endif
 		
 		loadPower = sourceVoltage * loadCurrent;
 		
 		watts = wattsConsumed / (HOUR_MILLIS / MEASURE_INTERVAL);
 		ampsConsumed = ampsConsumedADC * adc0.getMvPerCount() / 500 / (HOUR_MILLIS / MEASURE_INTERVAL);
+		#ifdef DEBUG
 		Serial.print("	Power="); Serial.print(loadPower,4); Serial.print("W");
 		Serial.print(" Total_Amps="); Serial.print(ampsConsumed,6); Serial.print("A•h");
 		Serial.print(" Total_Watts="); Serial.print(watts,6); Serial.print("W•h");
 		Serial.println();
+		#endif
 		
 		// delay(MEASURE_INTERVAL); // sleep all time left till next measure
 		// int wait = MEASURE_INTERVAL - (millis() - measure_init);
