@@ -106,7 +106,7 @@ void loop() {
 	static float watts = 0;
 	static float wattsConsumed = 0;
 	static float ampsConsumed = 0;
-	static uint64_t ampsConsumedADC = 0; // raw ADC counts
+	static int64_t ampsConsumedADC = 0; // raw ADC counts
 	static unsigned long measure_init, print_init = millis();
 	static int sensorOneCounts, sensorTwoCounts = 0;
 	static float loadCurrent, sourceVoltage, loadPower = 0;
