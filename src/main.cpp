@@ -16,14 +16,15 @@
 #define HOUR_MILLIS 3.6e6
 #define MEASURE_INTERVAL 500 	// millis
 #define PRINT_INTERVAL 1000 	// millis
-#define SHUNT_RESISTOR_mOhm 500 // resistor value in milliohms
+#define SHUNT_RESISTOR_mOhm 10 // resistor value in milliohms
 /*
  * Vsource x R2 / (R1 + R2) = Vout
  * Vsource = Vo x (R1 + R2) / R2
- * (10k + 6.8k) / 6.8k = 2.47 - ratio
+ * (10k + 6.8k) / 6.8k = 2.47 -> ratio
  * Vsource = Vo x 2.47
  */
-#define VOLTAGE_DIVIDER_RATIO 2.47
+// #define VOLTAGE_DIVIDER_RATIO 2.47 // Vsource / Vout
+#define VOLTAGE_DIVIDER_RATIO 11 // Vsource / Vout
 
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS); 
 
