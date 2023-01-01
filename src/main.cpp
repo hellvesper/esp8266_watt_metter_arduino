@@ -29,6 +29,7 @@
 #define MEASURE_INTERVAL 500 	// millis
 #define PRINT_INTERVAL 1000 	// millis
 #define SHUNT_RESISTOR_mOhm 1 // 0.001 Ohm resistor value in milliohms
+#define SHUNT_RESISTOR_Ohm 0.001 // 0.001 Ohm resistor value in milliohms
 /*
  * Vsource x R2 / (R1 + R2) = Vout
  * Vsource = Vo x (R1 + R2) / R2
@@ -38,9 +39,9 @@
 // #define VOLTAGE_DIVIDER_RATIO 2.47 // Vsource / Vout
 /*
  * current calculation for gain 2.048V and 0.001 Ohm current shunt
- * 2.048 / 2^16 = 0,00003125 V measurement interval and minimum measure voltage
- * 0,00003125 / 0.001 = 0,03125 (31.25mA) A current measurement inreval and min measure current
- * 0.03125 * 2^16 = 2048 A teoretical maximum current
+ * ±2.048 / 2^16 = 00000625 V measurement interval and minimum measure voltage
+ * 00000625 / 0.001 = 0.0625 (62.5mA) A current measurement inreval and min measure current
+ * (0.0625 * 2^16)/2 = ±2048 A teoretical maximum current
  * 
  * NB
  * To get higher current accuracy we can set as low gain as possible, but we should wery carefuly control MUX channels
@@ -132,6 +133,7 @@ void setup() {
     adc0.setMode(ADS1115_MODE_CONTINUOUS);
 	// Set gain to 2.048 volts as our supply 3.3v
 	adc0.setGain(ADS1115_PGA_2P048);
+	adc0.setRate(ADS1115_RATE_8); // low reate -> lower noise
 
 	wifiConnectHandler = WiFi.onStationModeGotIP(onWifiConnect);
 	wifiDisconnectHandler = WiFi.onStationModeDisconnected(onWifiDisconnect);
@@ -149,39 +151,68 @@ void loop() {
 	static float ampsConsumed = 0;
 	static int64_t ampsConsumedADC = 0; // raw ADC counts
 	static unsigned long measure_init, print_init = millis();
-	static int sensorOneCounts, sensorTwoCounts = 0;
+	static int sensorOneCounts, sensorTwoCounts = -1;
 	static float loadCurrent, sourceVoltage, loadPower = 0;
+	static bool VA = true;
 
-	if (millis() - measure_init > MEASURE_INTERVAL)
+	if (millis() - measure_init > MEASURE_INTERVAL/2)
 	{
 		measure_init = millis();		
 		//*** Amp ***
-		sensorOneCounts = 0;
-		sensorTwoCounts = 0;
+		// sensorOneCounts = -1;
+		// sensorTwoCounts = -1;
 		
-		sensorOneCounts=adc0.getConversionP0N1();  // counts up to 16-bits
-		ampsConsumedADC += sensorOneCounts;
-		loadCurrent = sensorOneCounts * adc0.getMvPerCount() / SHUNT_RESISTOR_mOhm; // Amps, 500mOhms is shunt resistor value
+		if (VA) // Amp measurement
+		{
+			if (sensorOneCounts == -1) // if first measure
+			{
+				/* code */
+				sensorOneCounts=adc0.getConversionP2N3();  // counts up to 16-bits
+				adc0.setMultiplexer(ADS1115_MUX_P0_N1); // set MUX to measure Voltage in next cycle
+			} else
+			{
+				sensorOneCounts=adc0.getConversion();  // MUX for amps should be set in voltage measure section
+				adc0.setMultiplexer(ADS1115_MUX_P0_N1); // set MUX to measure Voltage in next cycle
+			}
+			
+			
+			ampsConsumedADC += sensorOneCounts;
+			loadCurrent = sensorOneCounts * adc0.getMvPerCount() / 1000 / SHUNT_RESISTOR_Ohm; // Amps, 500mOhms is shunt resistor value
 
-		// *** Voltage ***
-		// Manually set the MUX  // could have used the getConversionP* above
-		adc0.setMultiplexer(ADS1115_MUX_P2_N3); 
-		sensorTwoCounts=adc0.getConversion();  // ADC raw
-		sourceVoltage = sensorTwoCounts * adc0.getMvPerCount() / 1000 * VOLTAGE_DIVIDER_RATIO; // Volts
-		wattsConsumed+= sourceVoltage * loadCurrent;
+			VA = !VA; // flip measure type
+		} else // Voltage measurement
+		{
+			// *** Voltage ***
+			// Manually set the MUX  // could have used the getConversionP* above
+			// adc0.setMultiplexer(ADS1115_MUX_P2_N3); 
+			// sensorTwoCounts=adc0.getConversionP0N1();  // counts up to 16-bits
+			sensorTwoCounts=adc0.getConversion();  // ADC raw
+			adc0.setMultiplexer(ADS1115_MUX_P2_N3); // set MUX to measure Amps in next cycle
+			sourceVoltage = sensorTwoCounts * adc0.getMvPerCount() / 1000 * VOLTAGE_DIVIDER_RATIO; // Volts
+			wattsConsumed+= sourceVoltage * loadCurrent;
+
+			VA = !VA; // flip measure type
+		}
+		
+		
+
 	}
 
 	if (millis() - print_init > PRINT_INTERVAL)
 	{
 		print_init = millis();
 		// Get the number of counts of the accumulator
-		// Serial.print("ADC1=");
-		// Serial.print(sensorOneCounts);
 
 		// To turn the counts into a voltage, we can use
 		#ifdef DEBUG
+		Serial.print("ADC1=");
+		Serial.print(sensorOneCounts);
+		Serial.print(" ADC2=");
+		Serial.print(sensorTwoCounts);
+		Serial.print(" mV Per Count=");
+		Serial.print(adc0.getMvPerCount(),4);
 		Serial.print(" mVoltage=");
-		Serial.print(sensorOneCounts*adc0.getMvPerCount(), 4);
+		Serial.print((float)(sensorOneCounts*adc0.getMvPerCount()), 4);
 		Serial.print("mV");
 		Serial.print(" Amp=");
 		Serial.print(loadCurrent,4);
@@ -199,7 +230,7 @@ void loop() {
 		watts = wattsConsumed / (HOUR_MILLIS / MEASURE_INTERVAL);
 		ampsConsumed = ampsConsumedADC * adc0.getMvPerCount() / 500 / (HOUR_MILLIS / MEASURE_INTERVAL);
 		#ifdef DEBUG
-		Serial.print("	Power="); Serial.print(loadPower,4); Serial.print("W");
+		Serial.print(" Power="); Serial.print(loadPower,4); Serial.print("W");
 		Serial.print(" Total_Amps="); Serial.print(ampsConsumed,6); Serial.print("A•h");
 		Serial.print(" Total_Watts="); Serial.print(watts,6); Serial.print("W•h");
 		Serial.println();
