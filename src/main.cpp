@@ -1,8 +1,20 @@
 /*
  *
- * Watt meter battery capacity tester 5V max, 4A max
- * default shunt resistor 0.5 Ohm, voltage devider 10K/6.8K
+ * Battery management system, 20V max and 20A max
+ * default shunt resistor 0.001 Ohm, voltage devider 10K/1K
  * 
+ * ESP8266 to ADS1115 wiring scheme:
+ * 
+ * 												 Rshunt (current sensing)
+ * 											+---|/\/\/\|----+
+ *  _ _ _ _ _ _			 _ _ _ _ _ _		|				|
+ * |		 D1|--------|SCL	AIN0|-------+				|
+ * |		 D2|--------|SDA	AIN1|-----------------------+
+ * |		   |		|			|		Voltage sensing
+ * |		   |		|		AIN2|---------( V )-----+
+ * |		   |		|		AIN3|---+				|
+ *  - - - - - -			 - - - - - -	|				|
+ * 										+---------------+	
  */
 
 #include <Arduino.h>
@@ -11,12 +23,12 @@
 #include <AsyncMqttClient.h>
 #include "ADS1115.h"
 
-#define DEBUG true
+#define DEBUG // remove or comment to disable serial debug
 
 #define HOUR_MILLIS 3.6e6
 #define MEASURE_INTERVAL 500 	// millis
 #define PRINT_INTERVAL 1000 	// millis
-#define SHUNT_RESISTOR_mOhm 10 // resistor value in milliohms
+#define SHUNT_RESISTOR_mOhm 1 // 0.001 Ohm resistor value in milliohms
 /*
  * Vsource x R2 / (R1 + R2) = Vout
  * Vsource = Vo x (R1 + R2) / R2
@@ -24,6 +36,16 @@
  * Vsource = Vo x 2.47
  */
 // #define VOLTAGE_DIVIDER_RATIO 2.47 // Vsource / Vout
+/*
+ * current calculation for gain 2.048V and 0.001 Ohm current shunt
+ * 2.048 / 2^16 = 0,00003125 V measurement interval and minimum measure voltage
+ * 0,00003125 / 0.001 = 0,03125 (31.25mA) A current measurement inreval and min measure current
+ * 0.03125 * 2^16 = 2048 A teoretical maximum current
+ * 
+ * NB
+ * To get higher current accuracy we can set as low gain as possible, but we should wery carefuly control MUX channels
+ * to avoid overvoltage and burn ADC
+*/
 #define VOLTAGE_DIVIDER_RATIO 11 // Vsource / Vout
 
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS); 
@@ -108,6 +130,7 @@ void setup() {
     
     // We're going to do continuous sampling
     adc0.setMode(ADS1115_MODE_CONTINUOUS);
+	// Set gain to 2.048 volts as our supply 3.3v
 	adc0.setGain(ADS1115_PGA_2P048);
 
 	wifiConnectHandler = WiFi.onStationModeGotIP(onWifiConnect);
@@ -138,7 +161,7 @@ void loop() {
 		
 		sensorOneCounts=adc0.getConversionP0N1();  // counts up to 16-bits
 		ampsConsumedADC += sensorOneCounts;
-		loadCurrent = sensorOneCounts * adc0.getMvPerCount() / 500; // Amps, 500mOhms is shunt resistor value
+		loadCurrent = sensorOneCounts * adc0.getMvPerCount() / SHUNT_RESISTOR_mOhm; // Amps, 500mOhms is shunt resistor value
 
 		// *** Voltage ***
 		// Manually set the MUX  // could have used the getConversionP* above
@@ -181,22 +204,19 @@ void loop() {
 		Serial.print(" Total_Watts="); Serial.print(watts,6); Serial.print("W•h");
 		Serial.println();
 		#endif
-		
-		// delay(MEASURE_INTERVAL); // sleep all time left till next measure
-		// int wait = MEASURE_INTERVAL - (millis() - measure_init);
-    	// delay(MEASURE_INTERVAL - (millis() - measure_init)); // sleep all time left till next measure
-		
+
+		// sent telemetry to mqtt broker
 		char buff[10]; // 9 digits + \0
 		dtostrf(sourceVoltage, 0, 4, buff);
-		mqttClient.publish("battester/voltage", 0, false, buff);
+		mqttClient.publish("battery/voltage", 0, false, buff);
 		dtostrf(loadCurrent, 0, 4, buff);
-		mqttClient.publish("battester/current", 0, false, buff);
+		mqttClient.publish("battery/current", 0, false, buff);
 		dtostrf(loadPower, 0, 4, buff);
-		mqttClient.publish("battester/power", 0, false, buff);
+		mqttClient.publish("battery/power", 0, false, buff);
 		dtostrf(ampsConsumed, 0, 6, buff);
-		mqttClient.publish("battester/amps", 0, false, buff);
+		mqttClient.publish("battery/amps", 0, false, buff);
 		dtostrf(watts, 0, 6, buff);
-		mqttClient.publish("battester/watts", 0, false, buff);
+		mqttClient.publish("battery/watts", 0, false, buff);
 	}
 	
 }
