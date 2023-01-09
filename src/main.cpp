@@ -22,6 +22,7 @@
 #include <Ticker.h>
 #include <AsyncMqttClient.h>
 #include "ADS1115.h"
+#include <Arduino_GFX_Library.h>
 
 #define DEBUG // remove or comment to disable serial debug
 
@@ -57,12 +58,186 @@ ADS1115 adc0(ADS1115_DEFAULT_ADDRESS);
 #define MQTT_HOST IPAddress(127,0,0,1)
 #define MQTT_PORT 1883
 
+/*
+ * Ring buffer structure for graph 
+ */
+#define MAX_SIZE 20
+
+/* More data bus class: https://github.com/moononournation/Arduino_GFX/wiki/Data-Bus-Class */
+Arduino_DataBus *bus = new Arduino_ESP8266SPI(D8 /* DC */, -1);
+
+/* More display class: https://github.com/moononournation/Arduino_GFX/wiki/Display-Class */
+Arduino_GFX *gfx = new Arduino_ST7789(
+  bus, D3 /* RST */, 0 /* rotation */, true /* IPS */,
+  240 /* width */, 240 /* height */);
+
+// Some ready-made 16-bit ('565') color settings:
+#define ST77XX_BLACK 0x0000
+#define ST77XX_WHITE 0xFFFF
+#define ST77XX_RED 0xF800
+#define ST77XX_GREEN 0x07E0
+#define ST77XX_BLUE 0x001F
+#define ST77XX_CYAN 0x07FF
+#define ST77XX_MAGENTA 0xF81F
+#define ST77XX_YELLOW 0xFFE0
+#define ST77XX_ORANGE 0xFC00
+
+
 AsyncMqttClient mqttClient;
 Ticker mqttReconnectTimer;
 
 WiFiEventHandler wifiConnectHandler;
 WiFiEventHandler wifiDisconnectHandler;
 Ticker wifiReconnectTimer;
+
+typedef struct {
+  float data[MAX_SIZE];
+  int head;
+  int tail;
+  int size;
+} Queue;
+
+void enqueue(Queue *q, float value) {
+  if (q->size == MAX_SIZE) {
+    // printf("Warning: queue is full, removing oldest element\n");
+    q->head = (q->head + 1) % MAX_SIZE;
+    q->size--;
+  }
+  q->data[q->tail] = value;
+  q->tail = (q->tail + 1) % MAX_SIZE;
+  q->size++;
+}
+
+float dequeue(Queue *q) {
+  if (q->size == 0) {
+    // printf("Error: queue is empty\n");
+    return -1;
+  }
+  float value = q->data[q->head];
+  q->head = (q->head + 1) % MAX_SIZE;
+  q->size--;
+  return value;
+}
+
+float queue_get(Queue *q, int index) {
+  if (index < 0 || index >= q->size) {
+    // printf("Error: index out of range\n");
+    return -1;
+  }
+  return q->data[(q->head + index) % MAX_SIZE];
+}
+
+void draw_graph(Queue *q, int x0, int y0, int w, int h, uint16_t color = ST77XX_GREEN, uint16_t bg = BLUE, bool bicolor = false, uint16_t color2 = ST77XX_GREEN) {
+  int16_t gy = y0+h;
+  uint16_t _color = color;
+  float min_y = h;
+  float max_y = 0;
+  for (int i = 0; i < q->size; i++)
+  {
+    if (min_y > queue_get(q,i))
+      min_y = queue_get(q,i);
+    if (max_y < queue_get(q,i))
+      max_y = queue_get(q,i);    
+  }
+
+  // calculate scaling
+  int ratio = (int)(h / (max_y - min_y));
+
+  int window = w - 15;
+  int sparse_rate = window / q->size;
+
+  gfx->fillRect(x0, y0, w, h+1, bg); // draw graph background
+  for (int i = 0; i < q->size; i++)
+  {
+    if (i > 0)
+    {
+      if (bicolor)
+      {
+        if (queue_get(q, i-1) < queue_get(q, i))
+        {
+          _color = color;
+          
+        } 
+        else {
+          _color = color2;
+          
+        }
+      }
+      
+      int16_t _y0 = (uint16_t)((queue_get(q, i-1) - min_y) * ratio);
+      int16_t _y1 = (uint16_t)((queue_get(q, i) - min_y) * ratio);
+      gfx->drawLine(x0+15+(i-1)*sparse_rate, gy-_y0, x0+15+i*sparse_rate, gy-_y1, _color);        
+    }
+  }
+  if (queue_get(q, q->size - 2) < queue_get(q, q->size-1))
+  {
+    gfx->fillRect(x0, y0, 10, h+1, bg); // draw graph background
+    gfx->fillTriangle(x0, y0+h-(h/4), x0+5, y0+(h/4), x0+10, y0+h-(h/4), GREEN);
+  } 
+  else
+  {
+    gfx->fillRect(x0, y0, 10, h+1, bg); // draw graph background
+    gfx->fillTriangle(x0, y0+(h/4), x0+5, y0+h-(h/4), x0+10, y0+(h/4), RED);
+  }  
+}
+
+void draw_node(int x0 , int y0, int w, int h, char label, float value, Queue *q, uint16_t label_color = RED, uint16_t border_color = 0xFC00, uint16_t text_color = RED)
+{
+  int16_t border_offset = 12;
+  uint8_t label_t_sz = 4;
+  uint8_t label_t_w = 4*6;
+  // uint8_t label_t_h = 4*8;
+  gfx->setCursor(x0,y0+8);
+  gfx->setTextSize(label_t_sz); // sz 4 = 24x30
+  gfx->setTextColor(label_color, BLACK);
+  gfx->print(label);
+  gfx->drawRoundRect(x0+label_t_w+1, y0, w, h, 10, border_color);
+  gfx->setCursor(x0+border_offset+label_t_w+1,y0+border_offset);
+  gfx->setTextSize(3);
+  gfx->setTextColor(text_color, BLACK);
+  if (value < 10)
+  {
+    gfx->print(value,3);
+  } else if (value < 100) {
+    gfx->print(value,2);
+  } else if (value < 1000) {
+    gfx->print(value,1);
+  } else if (value < 10000)
+  {
+    gfx->print(' ');
+    gfx->print(value,0);
+  } else if (value < 100000)
+  { // 10_000 .. 99_999
+    float kf = value / 1000;
+    float head = (int)kf;
+    float frac = kf - head;
+    int frac_int = frac * 100;
+    gfx->print((int)head);
+    gfx->print('K');
+    gfx->print(frac_int);
+  } else if (value < 1000000)
+  {
+    float kf = value / 1000;
+    float head = (int)kf;
+    float frac = kf - head;
+    int frac_int = frac * 10;
+    gfx->print((int)head);
+    gfx->print('K');
+    gfx->print(frac_int);
+  } else if (value < 10000000)
+  {
+    float kf = value / 1000000;
+    float head = (int)kf;
+    float frac = kf - head;
+    int frac_int = frac * 1000000;
+    gfx->print((int)head);
+    gfx->print('M');
+    gfx->print(frac_int);
+  }
+
+  draw_graph(q, x0+w+1+label_t_w+1+10, y0+8, gfx->width()-(x0+w+1+label_t_w+1+10)-1, 30, ST77XX_GREEN, BLACK, true, ST77XX_ORANGE);
+
+}
 
 void connectToWifi() {
 	#ifdef DEBUG
@@ -111,11 +286,50 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   }
 }
 
+Queue power_q;
+Queue watts_q;
+Queue amps_q;
+Queue volts_q;
+// float random_values[MAX_SIZE*4];
 
-void setup() {                
+void setup() {
+	power_q.head = 0;
+    power_q.tail = 0;
+    power_q.size = 0;
+
+	watts_q.head = 0;
+    watts_q.tail = 0;
+    watts_q.size = 0;
+
+	amps_q.head = 0;
+    amps_q.tail = 0;
+    amps_q.size = 0;
+
+	volts_q.head = 0;
+    volts_q.tail = 0;
+    volts_q.size = 0;
+
+    // for (size_t i = 0; i < MAX_SIZE*4; i++)
+    // {
+    //   random_values[i] = (float)random(700,1500)/100;
+    // }
+
+    gfx->begin();
+    gfx->fillScreen(BLACK);
+
+#ifdef GFX_BL
+    pinMode(GFX_BL, OUTPUT);
+    digitalWrite(GFX_BL, HIGH);
+#endif
+
+    gfx->setCursor(10, 10);
+    gfx->setTextColor(RED, BLACK);
+    gfx->println("Hello World!");
+    // gfx->setCursor(10, 50);
+
     Wire.begin();  // join I2C bus
 	#ifdef DEBUG
-    Serial.begin(19200); // initialize serial communication 
+    Serial.begin(74800); // initialize serial communication 
     Serial.println("Initializing I2C devices..."); 
 	#endif
     adc0.initialize(); // initialize ADS1115 16 bit A/D chip
@@ -150,18 +364,17 @@ void loop() {
 	static float wattsConsumed = 0;
 	static float ampsConsumed = 0;
 	static int64_t ampsConsumedADC = 0; // raw ADC counts
-	static unsigned long measure_init, print_init = millis();
-	static int sensorOneCounts, sensorTwoCounts = -1;
-	static float loadCurrent, sourceVoltage, loadPower = 0;
+	static unsigned long measure_init = millis(), print_init = millis(), current_millis;
+	static int sensorOneCounts = -1, sensorTwoCounts = -1;
+	static float amps = 0, volts = 0, power = 0;
 	static bool VA = true;
 
-	if (millis() - measure_init > MEASURE_INTERVAL/2)
+  current_millis = millis();
+	if (current_millis - measure_init > MEASURE_INTERVAL/2)
 	{
-		measure_init = millis();		
-		//*** Amp ***
-		// sensorOneCounts = -1;
-		// sensorTwoCounts = -1;
+		measure_init = current_millis;		
 		
+    //*** Amp ***		
 		if (VA) // Amp measurement
 		{
 			if (sensorOneCounts == -1) // if first measure
@@ -177,7 +390,7 @@ void loop() {
 			
 			
 			ampsConsumedADC += sensorOneCounts;
-			loadCurrent = sensorOneCounts * adc0.getMvPerCount() / 1000 / SHUNT_RESISTOR_Ohm; // Amps, 500mOhms is shunt resistor value
+			amps = sensorOneCounts * adc0.getMvPerCount() / 1000 / SHUNT_RESISTOR_Ohm; // Amps, 500mOhms is shunt resistor value
 
 			VA = !VA; // flip measure type
 		} else // Voltage measurement
@@ -188,8 +401,9 @@ void loop() {
 			// sensorTwoCounts=adc0.getConversionP0N1();  // counts up to 16-bits
 			sensorTwoCounts=adc0.getConversion();  // ADC raw
 			adc0.setMultiplexer(ADS1115_MUX_P2_N3); // set MUX to measure Amps in next cycle
-			sourceVoltage = sensorTwoCounts * adc0.getMvPerCount() / 1000 * VOLTAGE_DIVIDER_RATIO; // Volts
-			wattsConsumed+= sourceVoltage * loadCurrent;
+			volts = sensorTwoCounts * adc0.getMvPerCount() / 1000 * VOLTAGE_DIVIDER_RATIO; // Volts
+			power = volts * amps;
+			wattsConsumed+= power;
 
 			VA = !VA; // flip measure type
 		}
@@ -198,9 +412,10 @@ void loop() {
 
 	}
 
-	if (millis() - print_init > PRINT_INTERVAL)
+  current_millis = millis();
+	if (current_millis - print_init > PRINT_INTERVAL)
 	{
-		print_init = millis();
+		print_init = current_millis;
 		// Get the number of counts of the accumulator
 
 		// To turn the counts into a voltage, we can use
@@ -215,34 +430,48 @@ void loop() {
 		Serial.print((float)(sensorOneCounts*adc0.getMvPerCount()), 4);
 		Serial.print("mV");
 		Serial.print(" Amp=");
-		Serial.print(loadCurrent,4);
+		Serial.print(amps,4);
 		Serial.print("A");
 
 		// Serial.print("	ADC2=");
 		// Serial.print(sensorTwoCounts);  
 
 		Serial.print(" Voltage=");
-		Serial.print(sourceVoltage,4);
+		Serial.print(volts,4);
 		#endif
 		
-		loadPower = sourceVoltage * loadCurrent;
 		
 		watts = wattsConsumed / (HOUR_MILLIS / MEASURE_INTERVAL);
-		ampsConsumed = ampsConsumedADC * adc0.getMvPerCount() / 500 / (HOUR_MILLIS / MEASURE_INTERVAL);
+		ampsConsumed = ampsConsumedADC * adc0.getMvPerCount() / SHUNT_RESISTOR_mOhm / (HOUR_MILLIS / MEASURE_INTERVAL);
 		#ifdef DEBUG
-		Serial.print(" Power="); Serial.print(loadPower,4); Serial.print("W");
+		Serial.print(" Power="); Serial.print(power,4); Serial.print("W");
 		Serial.print(" Total_Amps="); Serial.print(ampsConsumed,6); Serial.print("A•h");
 		Serial.print(" Total_Watts="); Serial.print(watts,6); Serial.print("W•h");
+		Serial.print(" WattsConsumed="); Serial.print(wattsConsumed,6); Serial.print("W");
 		Serial.println();
 		#endif
 
+		// print values on display
+		enqueue(&power_q, power);
+		enqueue(&watts_q, watts);
+		enqueue(&amps_q, amps);
+		enqueue(&volts_q, volts);
+
+		draw_node(0,192,114,48,'V',volts, &volts_q, RED, ST77XX_ORANGE,RED);
+		draw_node(0,140,114,48,'A', amps, &amps_q, DARKGREEN, PURPLE,DARKGREEN);
+
+		// float instant_power = random_values[iter]*random_values[iter];
+		draw_node(0,88,114,48,'P', power, &power_q, PURPLE, DARKCYAN,PURPLE);
+		// watts_accumulator += instant_power;
+		draw_node(0,36,114,48,'W', watts, &watts_q, OLIVE, MAROON,OLIVE);
+
 		// sent telemetry to mqtt broker
 		char buff[10]; // 9 digits + \0
-		dtostrf(sourceVoltage, 0, 4, buff);
+		dtostrf(volts, 0, 4, buff);
 		mqttClient.publish("battery/voltage", 0, false, buff);
-		dtostrf(loadCurrent, 0, 4, buff);
+		dtostrf(amps, 0, 4, buff);
 		mqttClient.publish("battery/current", 0, false, buff);
-		dtostrf(loadPower, 0, 4, buff);
+		dtostrf(power, 0, 4, buff);
 		mqttClient.publish("battery/power", 0, false, buff);
 		dtostrf(ampsConsumed, 0, 6, buff);
 		mqttClient.publish("battery/amps", 0, false, buff);
