@@ -6,13 +6,13 @@
  * ESP8266 to ADS1115 wiring scheme:
  * 
  * 												 Rshunt (current sensing)
- * 											+---|/\/\/\|----+
- *  _ _ _ _ _ _			 _ _ _ _ _ _		|				|
- * |		 D1|--------|SCL	AIN0|-------+				|
- * |		 D2|--------|SDA	AIN1|-----------------------+
- * |		   |		|			|		Voltage sensing
- * |		   |		|		AIN2|---------( V )-----+
- * |		   |		|		AIN3|---+				|
+ * 											                +---|/\/\/\|----+
+ *  _ _ _ _ _ _           _ _ _ _ _        _|				|
+ * |		      D1|--------|SCL	AIN0|-------+				|
+ * |		      D2|--------|SDA	AIN1|-----------------------+
+ * |		        |    	   |	  		|		Voltage sensing
+ * |		        |		|		AIN2|---------( V )-----+
+ * |		        |		|		AIN3|---+				|
  *  - - - - - -			 - - - - - -	|				|
  * 										+---------------+	
  */
@@ -324,12 +324,15 @@ void setup() {
 
     gfx->setCursor(10, 10);
     gfx->setTextColor(RED, BLACK);
-    gfx->println("Hello World!");
+    gfx->println("Acid Battery Management System");
     // gfx->setCursor(10, 50);
 
     Wire.begin();  // join I2C bus
 	#ifdef DEBUG
-    Serial.begin(74800); // initialize serial communication 
+    Serial.begin(74800); // initialize serial communication
+    delay(2000);
+    Serial.println(ESP.getResetReason());
+    Serial.println(ESP.getResetInfo());
     Serial.println("Initializing I2C devices..."); 
 	#endif
     adc0.initialize(); // initialize ADS1115 16 bit A/D chip
@@ -424,8 +427,8 @@ void loop() {
 		Serial.print(sensorOneCounts);
 		Serial.print(" ADC2=");
 		Serial.print(sensorTwoCounts);
-		Serial.print(" mV Per Count=");
-		Serial.print(adc0.getMvPerCount(),4);
+		// Serial.print(" mV Per Count=");
+		// Serial.print(adc0.getMvPerCount(),4);
 		Serial.print(" mVoltage=");
 		Serial.print((float)(sensorOneCounts*adc0.getMvPerCount()), 4);
 		Serial.print("mV");
@@ -440,14 +443,15 @@ void loop() {
 		Serial.print(volts,4);
 		#endif
 		
-		
 		watts = wattsConsumed / (HOUR_MILLIS / MEASURE_INTERVAL);
 		ampsConsumed = ampsConsumedADC * adc0.getMvPerCount() / SHUNT_RESISTOR_mOhm / (HOUR_MILLIS / MEASURE_INTERVAL);
 		#ifdef DEBUG
-		Serial.print(" Power="); Serial.print(power,4); Serial.print("W");
-		Serial.print(" Total_Amps="); Serial.print(ampsConsumed,6); Serial.print("A•h");
-		Serial.print(" Total_Watts="); Serial.print(watts,6); Serial.print("W•h");
-		Serial.print(" WattsConsumed="); Serial.print(wattsConsumed,6); Serial.print("W");
+		Serial.print(" Power="); Serial.print(power,3); Serial.print("W");
+		Serial.print(" Total_Amps="); Serial.print(ampsConsumed,3); Serial.print("A•h");
+		Serial.print(" Total_Watts="); Serial.print(watts,3); Serial.print("W•h");
+		Serial.print(" WattsConsumed="); Serial.print(wattsConsumed,3); Serial.print("W");
+    Serial.print(" Heap:"); Serial.print(ESP.getFreeHeap());
+    Serial.print(" Frag:"); Serial.print(ESP.getHeapFragmentation());
 		Serial.println();
 		#endif
 
@@ -477,6 +481,8 @@ void loop() {
 		mqttClient.publish("battery/amps", 0, false, buff);
 		dtostrf(watts, 0, 6, buff);
 		mqttClient.publish("battery/watts", 0, false, buff);
+		dtostrf(ESP.getFreeHeap(), 0, 0, buff);
+		mqttClient.publish("battery/heap", 0, false, buff);
 	}
 	
 }
