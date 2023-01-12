@@ -1,3 +1,5 @@
+// This is a personal academic project. Dear PVS-Studio, please check it.
+// PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
 /*
  *
  * Battery management system, 20V max and 20A max
@@ -29,7 +31,7 @@
 #define HOUR_MILLIS 3.6e6
 #define MEASURE_INTERVAL 500 	// millis
 #define PRINT_INTERVAL 1000 	// millis
-#define SHUNT_RESISTOR_mOhm 1 // 0.001 Ohm resistor value in milliohms
+#define SHUNT_RESISTOR_mOhm 1.0F // 0.001 Ohm resistor value in milliohms
 #define SHUNT_RESISTOR_Ohm 0.001 // 0.001 Ohm resistor value in milliohms
 /*
  * Vsource x R2 / (R1 + R2) = Vout
@@ -50,7 +52,9 @@
 */
 #define VOLTAGE_DIVIDER_RATIO 11 // Vsource / Vout
 
+extern "C" {
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS); 
+}
 
 #define WIFI_SSID "MySSID"
 #define WIFI_PASSWORD "mypassword"
@@ -63,6 +67,7 @@ ADS1115 adc0(ADS1115_DEFAULT_ADDRESS);
  */
 #define MAX_SIZE 20
 
+extern "C" {
 /* More data bus class: https://github.com/moononournation/Arduino_GFX/wiki/Data-Bus-Class */
 Arduino_DataBus *bus = new Arduino_ESP8266SPI(D8 /* DC */, -1);
 
@@ -70,7 +75,7 @@ Arduino_DataBus *bus = new Arduino_ESP8266SPI(D8 /* DC */, -1);
 Arduino_GFX *gfx = new Arduino_ST7789(
   bus, D3 /* RST */, 0 /* rotation */, true /* IPS */,
   240 /* width */, 240 /* height */);
-
+}
 // Some ready-made 16-bit ('565') color settings:
 #define ST77XX_BLACK 0x0000
 #define ST77XX_WHITE 0xFFFF
@@ -83,6 +88,7 @@ Arduino_GFX *gfx = new Arduino_ST7789(
 #define ST77XX_ORANGE 0xFC00
 
 
+extern "C" {
 AsyncMqttClient mqttClient;
 Ticker mqttReconnectTimer;
 
@@ -96,8 +102,9 @@ typedef struct {
   int tail;
   int size;
 } Queue;
+}
 
-void enqueue(Queue *q, float value) {
+extern "C" void enqueue(Queue *q, float value) {
   if (q->size == MAX_SIZE) {
     // printf("Warning: queue is full, removing oldest element\n");
     q->head = (q->head + 1) % MAX_SIZE;
@@ -108,40 +115,50 @@ void enqueue(Queue *q, float value) {
   q->size++;
 }
 
-float dequeue(Queue *q) {
+extern "C" float dequeue(Queue *q) {
+  float value;
   if (q->size == 0) {
     // printf("Error: queue is empty\n");
-    return -1;
+    value = -1.0F;
+  } else
+  {
+    value = q->data[q->head];
+    q->head = (q->head + 1) % MAX_SIZE;
+    q->size--;
   }
-  float value = q->data[q->head];
-  q->head = (q->head + 1) % MAX_SIZE;
-  q->size--;
+
   return value;
 }
 
-float queue_get(Queue *q, int index) {
+extern "C" float queue_get(const Queue *q, int index) {
+  float result;
   if (index < 0 || index >= q->size) {
     // printf("Error: index out of range\n");
-    return -1;
+    result = INFINITY;
+  } else {
+
+  result = q->data[(q->head + index) % MAX_SIZE];
   }
-  return q->data[(q->head + index) % MAX_SIZE];
+  return result;
 }
 
-void draw_graph(Queue *q, int x0, int y0, int w, int h, uint16_t color = ST77XX_GREEN, uint16_t bg = BLUE, bool bicolor = false, uint16_t color2 = ST77XX_GREEN) {
+extern "C" void draw_graph(const Queue *q, int x0, int y0, int w, int h, uint16_t color = ST77XX_GREEN, uint16_t bg = BLUE, bool bicolor = false, uint16_t color2 = ST77XX_GREEN) {
   int16_t gy = y0+h;
   uint16_t _color = color;
   float min_y = h;
   float max_y = 0;
   for (int i = 0; i < q->size; i++)
   {
-    if (min_y > queue_get(q,i))
+    if (min_y > queue_get(q,i)) {
       min_y = queue_get(q,i);
-    if (max_y < queue_get(q,i))
+    }
+    if (max_y < queue_get(q,i)) {
       max_y = queue_get(q,i);    
+    }
   }
 
   // calculate scaling
-  int ratio = (int)(h / (max_y - min_y));
+  int ratio = static_cast<int>(static_cast<float>(h) / (max_y - min_y));
 
   int window = w - 15;
   int sparse_rate = window / q->size;
@@ -164,8 +181,8 @@ void draw_graph(Queue *q, int x0, int y0, int w, int h, uint16_t color = ST77XX_
         }
       }
       
-      int16_t _y0 = (uint16_t)((queue_get(q, i-1) - min_y) * ratio);
-      int16_t _y1 = (uint16_t)((queue_get(q, i) - min_y) * ratio);
+      int16_t _y0 = static_cast<uint16_t>((queue_get(q, i-1) - min_y) * static_cast<float>(ratio));
+      int16_t _y1 = static_cast<uint16_t>((queue_get(q, i) - min_y) * static_cast<float>(ratio));
       gfx->drawLine(x0+15+(i-1)*sparse_rate, gy-_y0, x0+15+i*sparse_rate, gy-_y1, _color);        
     }
   }
@@ -181,7 +198,7 @@ void draw_graph(Queue *q, int x0, int y0, int w, int h, uint16_t color = ST77XX_
   }  
 }
 
-void draw_node(int x0 , int y0, int w, int h, char label, float value, Queue *q, uint16_t label_color = RED, uint16_t border_color = 0xFC00, uint16_t text_color = RED)
+extern "C" void draw_node(int x0 , int y0, int w, int h, char label, float value, const Queue *q, uint16_t label_color = RED, uint16_t border_color = 0xFC00, uint16_t text_color = RED)
 {
   int16_t border_offset = 12;
   uint8_t label_t_sz = 4;
@@ -195,104 +212,113 @@ void draw_node(int x0 , int y0, int w, int h, char label, float value, Queue *q,
   gfx->setCursor(x0+border_offset+label_t_w+1,y0+border_offset);
   gfx->setTextSize(3);
   gfx->setTextColor(text_color, BLACK);
-  if (value < 10)
+  if (value < 10.0F)
   {
     gfx->print(value,3);
-  } else if (value < 100) {
+  } else if (value < 100.0F) {
     gfx->print(value,2);
-  } else if (value < 1000) {
+  } else if (value < 1000.0F) {
     gfx->print(value,1);
-  } else if (value < 10000)
+  } else if (value < 10000.0F)
   {
     gfx->print(' ');
     gfx->print(value,0);
-  } else if (value < 100000)
+  } else if (value < 100000.0F)
   { // 10_000 .. 99_999
-    float kf = value / 1000;
-    float head = (int)kf;
+    float kf = value / 1000.0F;
+    float head = static_cast<int>(kf);
     float frac = kf - head;
-    int frac_int = frac * 100;
-    gfx->print((int)head);
+    int frac_int = frac * 100.0F;
+    gfx->print(static_cast<int>(head));
     gfx->print('K');
     gfx->print(frac_int);
-  } else if (value < 1000000)
+  } else if (value < 1000000.0F)
   {
-    float kf = value / 1000;
-    float head = (int)kf;
+    float kf = value / 1000.0F;
+    float head = static_cast<int>(kf);
     float frac = kf - head;
-    int frac_int = frac * 10;
-    gfx->print((int)head);
+    int frac_int = frac * 10.0F;
+    gfx->print(static_cast<int>(head));
     gfx->print('K');
     gfx->print(frac_int);
-  } else if (value < 10000000)
+  } else if (value < 10000000.0F)
   {
-    float kf = value / 1000000;
-    float head = (int)kf;
+    float kf = value / 1000000.0F;
+    float head = static_cast<int>(kf);
     float frac = kf - head;
-    int frac_int = frac * 1000000;
-    gfx->print((int)head);
+    int frac_int = frac * 1000000.0F;
+    gfx->print(static_cast<int>(head));
     gfx->print('M');
     gfx->print(frac_int);
+  } else
+  {
+    gfx->print(F("OVERF"));
   }
+  
 
   draw_graph(q, x0+w+1+label_t_w+1+10, y0+8, gfx->width()-(x0+w+1+label_t_w+1+10)-1, 30, ST77XX_GREEN, BLACK, true, ST77XX_ORANGE);
 
 }
 
-void connectToWifi() {
+extern "C" void connectToWifi() {
 	#ifdef DEBUG
-  	Serial.println("Connecting to Wi-Fi...");
+  	Serial.println(F("Connecting to Wi-Fi..."));
 	#endif
-	WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+	WiFi.begin(F(WIFI_SSID), F(WIFI_PASSWORD));
 }
 
-void connectToMqtt() {
+extern "C" void connectToMqtt() {
 	#ifdef DEBUG
-  	Serial.println("Connecting to MQTT...");
+  	Serial.println(F("Connecting to MQTT..."));
 	#endif
   	mqttClient.connect();
 }
 
-void onWifiConnect(const WiFiEventStationModeGotIP& event) {
+extern "C" void onWifiConnect(const WiFiEventStationModeGotIP& event) {
 	#ifdef DEBUG
-  	Serial.println("Connected to Wi-Fi.");
+  	Serial.println(F("Connected to Wi-Fi."));
+  	Serial.println(event.ip);
 	#endif
   	connectToMqtt();
 }
 
-void onWifiDisconnect(const WiFiEventStationModeDisconnected& event) {
+extern "C" void onWifiDisconnect(const WiFiEventStationModeDisconnected& event) {
 	#ifdef DEBUG
-  	Serial.println("Disconnected from Wi-Fi.");
+  	Serial.println(F("Disconnected from Wi-Fi."));
+  	Serial.println(static_cast<int>(event.reason));
 	#endif
   	mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
-  	wifiReconnectTimer.once(2, connectToWifi);
+  	wifiReconnectTimer.once(2.0F, connectToWifi);
 }
 
-void onMqttConnect(bool sessionPresent) {
+extern "C" void onMqttConnect(bool sessionPresent) {
 	#ifdef DEBUG
-	Serial.println("Connected to MQTT.");
-	Serial.print("Session present: ");
+	Serial.println(F("Connected to MQTT."));
+	Serial.print(F("Session present: "));
 	Serial.println(sessionPresent);
 	#endif
 }
 
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+extern "C" void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
 	#ifdef DEBUG
-  	Serial.println("Disconnected from MQTT.");
+  	Serial.println(F("Disconnected from MQTT."));
+  	Serial.println(static_cast<int>(reason));
 	#endif
 
   if (WiFi.isConnected()) {
-	mqttReconnectTimer.once(2, connectToMqtt);
+	mqttReconnectTimer.once(2.0F, connectToMqtt);
   }
 }
 
+extern "C" {
 Queue power_q;
 Queue watts_q;
 Queue amps_q;
 Queue volts_q;
 // float random_values[MAX_SIZE*4];
+}
 
-void setup() {
+extern "C" void setup() {
 	power_q.head = 0;
     power_q.tail = 0;
     power_q.size = 0;
@@ -324,7 +350,7 @@ void setup() {
 
     gfx->setCursor(10, 10);
     gfx->setTextColor(RED, BLACK);
-    gfx->println("Acid Battery Management System");
+    gfx->println(F("Acid Battery Management System"));
     // gfx->setCursor(10, 50);
 
     Wire.begin();  // join I2C bus
@@ -333,13 +359,13 @@ void setup() {
     delay(2000);
     Serial.println(ESP.getResetReason());
     Serial.println(ESP.getResetInfo());
-    Serial.println("Initializing I2C devices..."); 
+    Serial.println(F("Initializing I2C devices...")); 
 	#endif
     adc0.initialize(); // initialize ADS1115 16 bit A/D chip
     
 	#ifdef DEBUG
-    Serial.println("Testing device connections...");
-    Serial.println(adc0.testConnection() ? "ADS1115 connection successful" : "ADS1115 connection failed");
+    Serial.println(F("Testing device connections..."));
+    Serial.println(adc0.testConnection() ? F("ADS1115 connection successful") : F("ADS1115 connection failed"));
 	#endif
       
     // To get output from this method, you'll need to turn on the 
@@ -362,7 +388,7 @@ void setup() {
 	connectToWifi();
 }
 
-void loop() {
+extern "C" void loop() {
 	static float watts = 0;
 	static float wattsConsumed = 0;
 	static float ampsConsumed = 0;
@@ -393,7 +419,7 @@ void loop() {
 			
 			
 			ampsConsumedADC += sensorOneCounts;
-			amps = sensorOneCounts * adc0.getMvPerCount() / 1000 / SHUNT_RESISTOR_Ohm; // Amps, 500mOhms is shunt resistor value
+			amps = static_cast<float>(sensorOneCounts) * adc0.getMvPerCount() / 1000.0F / SHUNT_RESISTOR_Ohm; // Amps, 500mOhms is shunt resistor value
 
 			VA = !VA; // flip measure type
 		} else // Voltage measurement
@@ -404,7 +430,7 @@ void loop() {
 			// sensorTwoCounts=adc0.getConversionP0N1();  // counts up to 16-bits
 			sensorTwoCounts=adc0.getConversion();  // ADC raw
 			adc0.setMultiplexer(ADS1115_MUX_P2_N3); // set MUX to measure Amps in next cycle
-			volts = sensorTwoCounts * adc0.getMvPerCount() / 1000 * VOLTAGE_DIVIDER_RATIO; // Volts
+			volts = static_cast<float>(sensorTwoCounts) * adc0.getMvPerCount() / 1000.0F * static_cast<float>(VOLTAGE_DIVIDER_RATIO); // Volts
 			power = volts * amps;
 			wattsConsumed+= power;
 
@@ -423,35 +449,35 @@ void loop() {
 
 		// To turn the counts into a voltage, we can use
 		#ifdef DEBUG
-		Serial.print("ADC1=");
+		Serial.print(F("ADC1="));
 		Serial.print(sensorOneCounts);
-		Serial.print(" ADC2=");
+		Serial.print(F(" ADC2="));
 		Serial.print(sensorTwoCounts);
 		// Serial.print(" mV Per Count=");
 		// Serial.print(adc0.getMvPerCount(),4);
-		Serial.print(" mVoltage=");
-		Serial.print((float)(sensorOneCounts*adc0.getMvPerCount()), 4);
-		Serial.print("mV");
-		Serial.print(" Amp=");
+		Serial.print(F(" mVoltage="));
+		Serial.print(static_cast<float>(sensorOneCounts)*adc0.getMvPerCount(), 4);
+		Serial.print(F("mV"));
+		Serial.print(F(" Amp="));
 		Serial.print(amps,4);
-		Serial.print("A");
+		Serial.print('A');
 
 		// Serial.print("	ADC2=");
 		// Serial.print(sensorTwoCounts);  
 
-		Serial.print(" Voltage=");
+		Serial.print(F(" Voltage="));
 		Serial.print(volts,4);
 		#endif
 		
-		watts = wattsConsumed / (HOUR_MILLIS / MEASURE_INTERVAL);
-		ampsConsumed = ampsConsumedADC * adc0.getMvPerCount() / SHUNT_RESISTOR_mOhm / (HOUR_MILLIS / MEASURE_INTERVAL);
+		watts = wattsConsumed / (HOUR_MILLIS / static_cast<float>(MEASURE_INTERVAL));
+		ampsConsumed = static_cast<double_t>(ampsConsumedADC) * adc0.getMvPerCount() / SHUNT_RESISTOR_mOhm / (HOUR_MILLIS / static_cast<float>(MEASURE_INTERVAL));
 		#ifdef DEBUG
-		Serial.print(" Power="); Serial.print(power,3); Serial.print("W");
-		Serial.print(" Total_Amps="); Serial.print(ampsConsumed,3); Serial.print("A•h");
-		Serial.print(" Total_Watts="); Serial.print(watts,3); Serial.print("W•h");
-		Serial.print(" WattsConsumed="); Serial.print(wattsConsumed,3); Serial.print("W");
-    Serial.print(" Heap:"); Serial.print(ESP.getFreeHeap());
-    Serial.print(" Frag:"); Serial.print(ESP.getHeapFragmentation());
+		Serial.print(F(" Power=")); Serial.print(power,3); Serial.print('W');
+		Serial.print(F(" Total_Amps=")); Serial.print(ampsConsumed,3); Serial.print(F("A•h"));
+		Serial.print(F(" Total_Watts=")); Serial.print(watts,3); Serial.print(F("W•h"));
+		Serial.print(F(" WattsConsumed=")); Serial.print(wattsConsumed,3); Serial.print('W');
+    Serial.print(F(" Heap:")); Serial.print(ESP.getFreeHeap());
+    Serial.print(F(" Frag:")); Serial.print(ESP.getHeapFragmentation());
 		Serial.println();
 		#endif
 
@@ -471,17 +497,17 @@ void loop() {
 
 		// sent telemetry to mqtt broker
 		char buff[10]; // 9 digits + \0
-		dtostrf(volts, 0, 4, buff);
+		dtostrf(volts, 0, 4U, buff);
 		mqttClient.publish("battery/voltage", 0, false, buff);
-		dtostrf(amps, 0, 4, buff);
+		dtostrf(amps, 0, 4U, buff);
 		mqttClient.publish("battery/current", 0, false, buff);
-		dtostrf(power, 0, 4, buff);
+		dtostrf(power, 0, 4U, buff);
 		mqttClient.publish("battery/power", 0, false, buff);
-		dtostrf(ampsConsumed, 0, 6, buff);
+		dtostrf(ampsConsumed, 0, 6U, buff);
 		mqttClient.publish("battery/amps", 0, false, buff);
-		dtostrf(watts, 0, 6, buff);
+		dtostrf(watts, 0, 6U, buff);
 		mqttClient.publish("battery/watts", 0, false, buff);
-		dtostrf(ESP.getFreeHeap(), 0, 0, buff);
+    itoa(ESP.getFreeHeap(), buff, 10);
 		mqttClient.publish("battery/heap", 0, false, buff);
 	}
 	
