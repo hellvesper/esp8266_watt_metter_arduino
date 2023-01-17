@@ -8,15 +8,15 @@
  * ESP8266 to ADS1115 wiring scheme:
  * 
  * 												 Rshunt (current sensing)
- * 											                +---|/\/\/\|----+
- *  _ _ _ _ _ _           _ _ _ _ _        _|				|
- * |		      D1|--------|SCL	AIN0|-------+				|
+ * 											                    +---|/\/\/\|----+
+ *  _ _ _ _ _ _           _ _ _ _ _        _|   			     	|
+ * |		      D1|--------|SCL	AIN0|-------+                 |
  * |		      D2|--------|SDA	AIN1|-----------------------+
  * |		        |    	   |	  		|		Voltage sensing
- * |		        |		|		AIN2|---------( V )-----+
- * |		        |		|		AIN3|---+				|
- *  - - - - - -			 - - - - - -	|				|
- * 										+---------------+	
+ * |		        |        |		AIN2|---------( V )-----+
+ * |		        |        |		AIN3|---+				        |
+ *  - - - - - -			      - - - - - -	|            		|
+ * 										                +---------------+	
  */
 
 #include <Arduino.h>
@@ -397,6 +397,7 @@ extern "C" void loop() {
 	static int sensorOneCounts = -1, sensorTwoCounts = -1;
 	static float amps = 0, volts = 0, power = 0;
 	static bool VA = true;
+  static float mV_per_count = adc0.getMvPerCount();
 
   current_millis = millis();
 	if (current_millis - measure_init > MEASURE_INTERVAL/2)
@@ -416,10 +417,12 @@ extern "C" void loop() {
 				sensorOneCounts=adc0.getConversion();  // MUX for amps should be set in voltage measure section
 				adc0.setMultiplexer(ADS1115_MUX_P0_N1); // set MUX to measure Voltage in next cycle
 			}
+      //DEBUG
+      // sensorOneCounts = 100;
 			
 			
 			ampsConsumedADC += sensorOneCounts;
-			amps = static_cast<float>(sensorOneCounts) * adc0.getMvPerCount() / 1000.0F / SHUNT_RESISTOR_Ohm; // Amps, 500mOhms is shunt resistor value
+			amps = static_cast<float>(sensorOneCounts) * mV_per_count / 1000.0F / SHUNT_RESISTOR_Ohm; // Amps, 500mOhms is shunt resistor value
 
 			VA = !VA; // flip measure type
 		} else // Voltage measurement
@@ -430,7 +433,7 @@ extern "C" void loop() {
 			// sensorTwoCounts=adc0.getConversionP0N1();  // counts up to 16-bits
 			sensorTwoCounts=adc0.getConversion();  // ADC raw
 			adc0.setMultiplexer(ADS1115_MUX_P2_N3); // set MUX to measure Amps in next cycle
-			volts = static_cast<float>(sensorTwoCounts) * adc0.getMvPerCount() / 1000.0F * static_cast<float>(VOLTAGE_DIVIDER_RATIO); // Volts
+			volts = static_cast<float>(sensorTwoCounts) * mV_per_count / 1000.0F * static_cast<float>(VOLTAGE_DIVIDER_RATIO); // Volts
 			power = volts * amps;
 			wattsConsumed+= power;
 
@@ -456,7 +459,7 @@ extern "C" void loop() {
 		// Serial.print(" mV Per Count=");
 		// Serial.print(adc0.getMvPerCount(),4);
 		Serial.print(F(" mVoltage="));
-		Serial.print(static_cast<float>(sensorOneCounts)*adc0.getMvPerCount(), 4);
+		Serial.print(static_cast<float>(sensorOneCounts)*mV_per_count, 4);
 		Serial.print(F("mV"));
 		Serial.print(F(" Amp="));
 		Serial.print(amps,4);
@@ -470,7 +473,7 @@ extern "C" void loop() {
 		#endif
 		
 		watts = wattsConsumed / (HOUR_MILLIS / static_cast<float>(MEASURE_INTERVAL));
-		ampsConsumed = static_cast<double_t>(ampsConsumedADC) * adc0.getMvPerCount() / SHUNT_RESISTOR_mOhm / (HOUR_MILLIS / static_cast<float>(MEASURE_INTERVAL));
+		ampsConsumed = static_cast<double_t>(ampsConsumedADC) * mV_per_count / SHUNT_RESISTOR_mOhm / (HOUR_MILLIS / static_cast<float>(MEASURE_INTERVAL));
 		#ifdef DEBUG
 		Serial.print(F(" Power=")); Serial.print(power,3); Serial.print('W');
 		Serial.print(F(" Total_Amps=")); Serial.print(ampsConsumed,3); Serial.print(F("A•h"));
